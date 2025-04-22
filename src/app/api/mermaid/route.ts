@@ -1,8 +1,5 @@
 import { NextResponse } from 'next/server';
 import { v2 as cloudinary } from 'cloudinary';
-import mermaid from 'mermaid';
-import sharp from 'sharp';
-import { JSDOM } from 'jsdom';
 
 // Configuración de Cloudinary
 cloudinary.config({
@@ -10,6 +7,10 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
+
+// Specify Node.js runtime for Vercel
+export const runtime = 'nodejs';
+export const maxDuration = 60; // Increase function timeout to 60 seconds
 
 export async function POST(request: Request) {
   try {
@@ -30,42 +31,56 @@ export async function POST(request: Request) {
       );
     }
 
-    // Crear un entorno DOM virtual con JSDOM
-    const dom = new JSDOM(`<!DOCTYPE html><html><body><div id="container"></div></body></html>`);
+    // Dynamically import mermaid to avoid initialization issues
+    const { default: mermaid } = await import('mermaid');
+    
+    // Create a minimal browser-like environment
+    const { JSDOM } = await import('jsdom');
+    const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>');
+    
+    // Set up the global objects needed by mermaid
     global.document = dom.window.document;
-    global.window = dom.window as unknown as Window & typeof globalThis;
-
-    // Inicializar mermaid sin el uso de DOM (headless)
-    mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
-
-    // Renderizar el diagrama Mermaid a SVG
+    global.SVGElement = dom.window.SVGElement;
+    global.navigator = dom.window.navigator;
+    
+    // Initialize mermaid with server-friendly settings
+    mermaid.initialize({ 
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'default',
+      logLevel: 1,
+      flowchart: { htmlLabels: false }
+    });
+    
+    // Render the diagram
     const { svg } = await mermaid.render('mermaid-diagram', mermaidCode);
-
-    // Convertir el SVG a PNG usando sharp
+    
+    // Import sharp dynamically
+    const { default: sharp } = await import('sharp');
+    
+    // Convert SVG to PNG
     const pngBuffer = await sharp(Buffer.from(svg))
-      .png()  // Convertir a PNG
+      .png()
       .toBuffer();
 
-    // Subir el PNG a Cloudinary
+    // Upload to Cloudinary
     const uploadResponse = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { folder: 'mermaid-diagrams', format: 'png' }, // Especificamos el formato como PNG
+        { folder: 'mermaid-diagrams', format: 'png' },
         (error, result) => {
           if (error) reject(error);
           else resolve(result);
         }
       );
 
-      uploadStream.end(pngBuffer);  // Subimos el buffer de la imagen PNG
+      uploadStream.end(pngBuffer);
     });
 
-    // Devolver la URL generada de Cloudinary
     return NextResponse.json({
       success: true,
       url: (uploadResponse as { secure_url: string }).secure_url,
     });
-  } catch (error) {
-    console.error('Error:', error);
+  } catch {
     return NextResponse.json(
       { error: 'No se pudo generar el diagrama' },
       { status: 500 }
