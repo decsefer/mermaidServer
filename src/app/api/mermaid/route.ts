@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { v2 as cloudinary } from 'cloudinary';
+import { JSDOM } from 'jsdom'; // Importar jsdom directamente
+import DOMPurify from 'dompurify'; // Importar DOMPurify directamente
 
 // Configuración de Cloudinary
 cloudinary.config({
@@ -8,9 +10,9 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Specify Node.js runtime for Vercel
+// Especificamos Node.js como el entorno de ejecución
 export const runtime = 'nodejs';
-export const maxDuration = 60; // Increase function timeout to 60 seconds
+export const maxDuration = 60; // Aumentamos el tiempo máximo de ejecución a 60 segundos
 
 export async function POST(request: Request) {
   try {
@@ -31,60 +33,49 @@ export async function POST(request: Request) {
       );
     }
 
-    // Create a minimal browser-like environment first
-    const { JSDOM } = await import('jsdom');
+    // Crear un entorno DOM virtual con JSDOM
     const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>');
     
-    // Set up the global objects needed by mermaid
-    global.window = dom.window as unknown as Window & typeof globalThis;
+    // Establecer los objetos globales necesarios para mermaid
     global.document = dom.window.document;
+    global.window = dom.window as unknown as Window & typeof globalThis;
     global.SVGElement = dom.window.SVGElement;
     
-    // Create a custom navigator object instead of trying to set the global one
-    Object.defineProperty(global, 'navigator', {
-      value: {
-        userAgent: 'node.js',
-        language: 'en-US',
-      },
-      writable: true
-    });
+    // Configurar DOMPurify con el entorno virtual
+    const purify = DOMPurify(dom.window);
     
-    // Now import mermaid after the environment is set up
+    // Sanitize el código Mermaid
+    const sanitizedCode = purify.sanitize(mermaidCode); // Usamos sanitize correctamente
+    
+    // Importar mermaid de manera dinámica para evitar problemas de inicialización en Vercel
     const { default: mermaid } = await import('mermaid');
     
-    // Initialize mermaid with server-friendly settings
-    mermaid.initialize({ 
+    // Inicializar mermaid con una configuración adecuada para servidores
+    mermaid.initialize({
       startOnLoad: false,
       securityLevel: 'loose',
       theme: 'default',
       logLevel: 1,
-      flowchart: { htmlLabels: false }
+      flowchart: { htmlLabels: false },
     });
-    
-    // Render the diagram
-    const { svg } = await mermaid.render('mermaid-diagram', mermaidCode);
-    
-    // Import sharp dynamically
-    const { default: sharp } = await import('sharp');
-    
-    // Convert SVG to PNG
-    const pngBuffer = await sharp(Buffer.from(svg))
-      .png()
-      .toBuffer();
 
-    // Upload to Cloudinary
+    // Renderizar el diagrama
+    const { svg } = await mermaid.render('mermaid-diagram', sanitizedCode);
+
+    // Subir el SVG a Cloudinary (sin convertirlo a PNG)
     const uploadResponse = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { folder: 'mermaid-diagrams', format: 'png' },
+        { folder: 'mermaid-diagrams', resource_type: 'image' }, // Especificamos que es una imagen SVG
         (error, result) => {
           if (error) reject(error);
           else resolve(result);
         }
       );
 
-      uploadStream.end(pngBuffer);
+      uploadStream.end(Buffer.from(svg)); // Subimos el SVG generado como imagen
     });
 
+    // Devolver la URL generada de Cloudinary
     return NextResponse.json({
       success: true,
       url: (uploadResponse as { secure_url: string }).secure_url,
