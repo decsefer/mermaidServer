@@ -10,7 +10,7 @@ cloudinary.config({
 
 // Specify Node.js runtime for Vercel
 export const runtime = 'nodejs';
-export const maxDuration = 60; // Increase function timeout to 60 seconds
+export const maxDuration = 600; // Increase function timeout to 60 seconds
 
 export async function POST(request: Request) {
   try {
