@@ -1,18 +1,36 @@
 import { NextResponse } from 'next/server';
-import puppeteer from 'puppeteer-core';
 import { v2 as cloudinary } from 'cloudinary';
 import chromium from '@sparticuz/chromium';
+import puppeteer from 'puppeteer-core';
 
-// Configuración de Cloudinary
+// Cloudinary configuration
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true,
 });
 
-export const dynamic = 'force-dynamic';
+// Helper to get the executable path depending on environment
+async function getExecutablePath() {
+  // If running on Vercel/serverless, use chromium
+  const isServerless = !!process.env.AWS_LAMBDA_FUNCTION_VERSION || process.env.VERCEL;
+  if (isServerless) {
+    return await chromium.executablePath();
+  }
+  // Local development: use installed Chrome
+  if (process.platform === 'win32') {
+    return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  } else if (process.platform === 'darwin') {
+    return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  } else {
+    return '/usr/bin/google-chrome';
+  }
+}
 
+// POST function for generating and uploading the diagram
 export async function POST(request: Request) {
+  let browser;
   try {
     const body = await request.text();
     let mermaidCode: string;
@@ -26,22 +44,24 @@ export async function POST(request: Request) {
 
     if (!mermaidCode) {
       return NextResponse.json(
-        { error: 'Se requiere código Mermaid' },
+        { error: 'Mermaid code is required' },
         { status: 400 }
       );
     }
 
-    // Lanzar Puppeteer con Chromium proporcionado por @sparticuz/chromium
-    const browser = await puppeteer.launch({
+    // Launch Puppeteer with environment-aware configuration
+    const executablePath = await getExecutablePath();
+    browser = await puppeteer.launch({
       args: chromium.args,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-      acceptInsecureCerts: true,
+      defaultViewport: chromium.defaultViewport,
+      executablePath,
+      headless: true,
+      ignoreHTTPSErrors: true,
     });
 
     const page = await browser.newPage();
 
-    // Cargar el contenido de Mermaid
+    // ... existing code ...
     await page.setContent(`
       <!DOCTYPE html>
       <html>
@@ -57,23 +77,20 @@ export async function POST(request: Request) {
       </html>
     `);
 
-    // Esperar a que se renderice el SVG
     await page.waitForSelector('.mermaid svg');
     const element = await page.$('.mermaid svg');
-
+    
     if (!element) {
-      throw new Error('No se pudo generar el diagrama');
+      throw new Error('Failed to generate diagram');
     }
 
-    // Tomar una captura de pantalla
     const buffer = await element.screenshot({
       type: 'png',
-      omitBackground: true,
+      omitBackground: true
     });
 
     await browser.close();
 
-    // Subir a Cloudinary
     const uploadResponse = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         { folder: 'mermaid-diagrams' },
@@ -82,18 +99,21 @@ export async function POST(request: Request) {
           else resolve(result);
         }
       );
-
       uploadStream.end(buffer);
     });
 
     return NextResponse.json({
       success: true,
-      url: (uploadResponse as { secure_url: string }).secure_url,
+      url: (uploadResponse as { secure_url: string }).secure_url
     });
+
   } catch (error) {
     console.error('Error:', error);
+    if (browser) {
+      await browser.close();
+    }
     return NextResponse.json(
-      { error: 'No se pudo generar el diagrama' },
+      { error: 'Failed to generate diagram' },
       { status: 500 }
     );
   }
