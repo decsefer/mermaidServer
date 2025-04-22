@@ -1,18 +1,15 @@
 import { NextResponse } from 'next/server';
 import { v2 as cloudinary } from 'cloudinary';
-import fs from 'fs';
-import path from 'path';
-import { exec } from 'child_process';
-import util from 'util';
+import mermaid from 'mermaid';
+import sharp from 'sharp';
+import { JSDOM } from 'jsdom';
+import createDOMPurify from 'dompurify';
 
-// Promisify exec for easier async/await usage
-const execPromise = util.promisify(exec);
-
-// Cloudinary configuration
+// Configuración de Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 export async function POST(request: Request) {
@@ -29,69 +26,56 @@ export async function POST(request: Request) {
 
     if (!mermaidCode) {
       return NextResponse.json(
-        { error: 'Mermaid code is required' },
+        { error: 'Se requiere el código Mermaid' },
         { status: 400 }
       );
     }
 
-    // Detect if we're in Vercel environment
-    const isVercel = process.env.VERCEL === '1';  // Vercel sets this environment variable
+    // Crear un entorno DOM virtual
+    const dom = new JSDOM(`<!DOCTYPE html><html><body><div id="container"></div></body></html>`);
+    global.document = dom.window.document;
+    global.window = dom.window as unknown as Window & typeof globalThis;
+    
+    // Setup DOMPurify with the virtual window
+    const DOMPurify = createDOMPurify(dom.window);
+    
+    // Inicializamos mermaid
+    mermaid.initialize({ 
+      startOnLoad: false,
+      securityLevel: 'loose'
+    });
 
-    // Use /tmp directory only in Vercel
-    const tempDir = isVercel ? '/tmp' : '';  // Use /tmp on Vercel, otherwise leave empty
+    // Sanitize the mermaid code
+    const sanitizedCode = DOMPurify.sanitize(mermaidCode);
+    const { svg } = await mermaid.render('mermaid-diagram', sanitizedCode);
 
-    // If not in Vercel, just return an error or skip the diagram generation
-    if (!isVercel) {
-      return NextResponse.json(
-        { error: 'This feature is only available in Vercel' },
-        { status: 400 }
-      );
-    }
+    // Convertir el SVG a PNG usando sharp
+    const pngBuffer = await sharp(Buffer.from(svg))
+      .png()
+      .toBuffer();
 
-    const outputPath = path.join(tempDir, 'mermaid-diagram.svg');
-    const tempFilePath = path.join(tempDir, 'mermaidCode.mmd');
-
-    // Crear un archivo temporal con el código Mermaid para pasarlo a mermaid-cli
-    fs.writeFileSync(tempFilePath, mermaidCode);
-
-    // Ejecutar mermaid.cli para generar el SVG usando npx
-    try {
-      await execPromise(`npx @mermaid-js/mermaid-cli -i ${tempFilePath} -o ${outputPath}`);
-    } catch (error) {
-      console.error("Error generating diagram:", error);
-      throw new Error("Error generating diagram");
-    }
-
-    // Leer el archivo generado
-    const buffer = fs.readFileSync(outputPath);
-
-    // Subir el diagrama generado a Cloudinary
+    // Subir el PNG a Cloudinary
     const uploadResponse = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { folder: 'mermaid-diagrams' },
+        { folder: 'mermaid-diagrams', format: 'png' },
         (error, result) => {
           if (error) reject(error);
           else resolve(result);
         }
       );
 
-      uploadStream.end(buffer);
+      uploadStream.end(pngBuffer);
     });
-
-    // Eliminar los archivos temporales
-    fs.unlinkSync(tempFilePath);
-    fs.unlinkSync(outputPath);
 
     // Devolver la URL generada de Cloudinary
     return NextResponse.json({
       success: true,
-      url: (uploadResponse as { secure_url: string }).secure_url
+      url: (uploadResponse as { secure_url: string }).secure_url,
     });
-
   } catch (error) {
     console.error('Error:', error);
     return NextResponse.json(
-      { error: 'Failed to generate diagram' },
+      { error: 'No se pudo generar el diagrama' },
       { status: 500 }
     );
   }
