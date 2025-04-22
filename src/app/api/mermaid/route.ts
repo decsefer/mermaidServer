@@ -34,8 +34,20 @@ export async function POST(request: Request) {
       );
     }
 
-    // Asegurarse de usar el directorio correcto temporal para Vercel
-    const tempDir = '/tmp'; // Usar /tmp explícitamente en Vercel
+    // Detect if we're in Vercel environment
+    const isVercel = process.env.VERCEL === '1';  // Vercel sets this environment variable
+
+    // Use /tmp directory only in Vercel
+    const tempDir = isVercel ? '/tmp' : '';  // Use /tmp on Vercel, otherwise leave empty
+
+    // If not in Vercel, just return an error or skip the diagram generation
+    if (!isVercel) {
+      return NextResponse.json(
+        { error: 'This feature is only available in Vercel' },
+        { status: 400 }
+      );
+    }
+
     const outputPath = path.join(tempDir, 'mermaid-diagram.svg');
     const tempFilePath = path.join(tempDir, 'mermaidCode.mmd');
 
