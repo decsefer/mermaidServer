@@ -44,9 +44,9 @@ export async function POST(request: Request) {
     // Crear un archivo temporal con el código Mermaid para pasarlo a mermaid-cli
     fs.writeFileSync(tempFilePath, mermaidCode);
 
-    // Ejecutar mermaid.cli para generar el SVG
+    // Ejecutar mermaid.cli para generar el SVG usando npx
     try {
-      await execPromise(`mmdc -i ${tempFilePath} -o ${outputPath}`);
+      await execPromise(`npx @mermaid-js/mermaid-cli -i ${tempFilePath} -o ${outputPath}`);
     } catch (error) {
       console.error("Error generating diagram:", error);
       throw new Error("Error generating diagram");
