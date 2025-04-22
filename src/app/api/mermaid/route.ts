@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
+import puppeteer from 'puppeteer-core';
 import { v2 as cloudinary } from 'cloudinary';
-import { JSDOM } from 'jsdom'; // Importar jsdom directamente
-import DOMPurify from 'dompurify'; // Importar DOMPurify directamente
+import chromium from '@sparticuz/chromium';
 
 // Configuración de Cloudinary
 cloudinary.config({
@@ -10,9 +10,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Especificamos Node.js como el entorno de ejecución
-export const runtime = 'nodejs';
-export const maxDuration = 60; // Aumentamos el tiempo máximo de ejecución a 60 segundos
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
@@ -28,59 +26,66 @@ export async function POST(request: Request) {
 
     if (!mermaidCode) {
       return NextResponse.json(
-        { error: 'Se requiere el código Mermaid' },
+        { error: 'Se requiere código Mermaid' },
         { status: 400 }
       );
     }
 
-    // Crear un entorno DOM virtual con JSDOM
-    const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>');
-    
-    // Establecer los objetos globales necesarios para mermaid
-    global.document = dom.window.document;
-    global.window = dom.window as unknown as Window & typeof globalThis;
-    global.SVGElement = dom.window.SVGElement;
-    
-    // Configurar DOMPurify con el entorno virtual de JSDOM
-    const purify = DOMPurify(dom.window); // Aseguramos que DOMPurify use el entorno de JSDOM
-    
-    // Sanitize el código Mermaid
-    const sanitizedCode = purify.sanitize(mermaidCode); // Usamos sanitize correctamente
-    
-    // Importar mermaid de manera dinámica para evitar problemas de inicialización en Vercel
-    const { default: mermaid } = await import('mermaid');
-    
-    // Inicializar mermaid con una configuración adecuada para servidores
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: 'loose',
-      theme: 'default',
-      logLevel: 1,
-      flowchart: { htmlLabels: false },
+    // Lanzar Puppeteer con Chromium proporcionado por @sparticuz/chromium
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+      acceptInsecureCerts: true,
     });
 
-    // Renderizar el diagrama
-    const { svg } = await mermaid.render('mermaid-diagram', sanitizedCode);
+    const page = await browser.newPage();
 
-    // Subir el SVG a Cloudinary y pedir que se convierta a PNG
+    // Cargar el contenido de Mermaid
+    await page.setContent(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+          <script>
+            mermaid.initialize({ startOnLoad: true });
+          </script>
+        </head>
+        <body>
+          <div class="mermaid">${mermaidCode}</div>
+        </body>
+      </html>
+    `);
+
+    // Esperar a que se renderice el SVG
+    await page.waitForSelector('.mermaid svg');
+    const element = await page.$('.mermaid svg');
+
+    if (!element) {
+      throw new Error('No se pudo generar el diagrama');
+    }
+
+    // Tomar una captura de pantalla
+    const buffer = await element.screenshot({
+      type: 'png',
+      omitBackground: true,
+    });
+
+    await browser.close();
+
+    // Subir a Cloudinary
     const uploadResponse = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { 
-          folder: 'mermaid-diagrams',
-          resource_type: 'image',
-          format: 'png', // Solicitamos la conversión de SVG a PNG
-          public_id: 'mermaid-diagram' // Usamos un ID público único para el diagrama
-        },
+        { folder: 'mermaid-diagrams' },
         (error, result) => {
           if (error) reject(error);
           else resolve(result);
         }
       );
 
-      uploadStream.end(Buffer.from(svg)); // Subimos el SVG generado como imagen
+      uploadStream.end(buffer);
     });
 
-    // Devolver la URL generada de Cloudinary
     return NextResponse.json({
       success: true,
       url: (uploadResponse as { secure_url: string }).secure_url,
