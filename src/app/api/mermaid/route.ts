@@ -10,7 +10,7 @@ cloudinary.config({
 
 // Specify Node.js runtime for Vercel
 export const runtime = 'nodejs';
-export const maxDuration = 600; // Increase function timeout to 60 seconds
+export const maxDuration = 60; // Increase function timeout to 60 seconds
 
 export async function POST(request: Request) {
   try {
@@ -31,17 +31,18 @@ export async function POST(request: Request) {
       );
     }
 
-    // Dynamically import mermaid to avoid initialization issues
-    const { default: mermaid } = await import('mermaid');
-    
-    // Create a minimal browser-like environment
+    // Create a minimal browser-like environment first
     const { JSDOM } = await import('jsdom');
     const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>');
     
     // Set up the global objects needed by mermaid
+    global.window = dom.window as unknown as Window & typeof globalThis;
     global.document = dom.window.document;
     global.SVGElement = dom.window.SVGElement;
     global.navigator = dom.window.navigator;
+    
+    // Now import mermaid after the environment is set up
+    const { default: mermaid } = await import('mermaid');
     
     // Initialize mermaid with server-friendly settings
     mermaid.initialize({ 
@@ -80,7 +81,8 @@ export async function POST(request: Request) {
       success: true,
       url: (uploadResponse as { secure_url: string }).secure_url,
     });
-  } catch {
+  } catch (error) {
+    console.error('Error:', error);
     return NextResponse.json(
       { error: 'No se pudo generar el diagrama' },
       { status: 500 }
