@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer';  // Usa puppeteer-core
+import chromium from 'chrome-aws-lambda'; // Importa chrome-aws-lambda para Chromium en serverless
 import { v2 as cloudinary } from 'cloudinary';
 
 // Cloudinary configuration
@@ -28,8 +29,13 @@ export async function POST(request: Request) {
       );
     }
 
-    // Launch Puppeteer
-    const browser = await puppeteer.launch();
+    // Launch Puppeteer with chrome-aws-lambda's Chromium binary
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath,
+      headless: chromium.headless,
+    });
+
     const page = await browser.newPage();
 
     // Load Mermaid content
