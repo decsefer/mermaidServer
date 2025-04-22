@@ -3,7 +3,6 @@ import { v2 as cloudinary } from 'cloudinary';
 import mermaid from 'mermaid';
 import sharp from 'sharp';
 import { JSDOM } from 'jsdom';
-import createDOMPurify from 'dompurify';
 
 // Configuración de Cloudinary
 cloudinary.config({
@@ -31,40 +30,33 @@ export async function POST(request: Request) {
       );
     }
 
-    // Crear un entorno DOM virtual
+    // Crear un entorno DOM virtual con JSDOM
     const dom = new JSDOM(`<!DOCTYPE html><html><body><div id="container"></div></body></html>`);
     global.document = dom.window.document;
     global.window = dom.window as unknown as Window & typeof globalThis;
-    
-    // Setup DOMPurify with the virtual window
-    const DOMPurify = createDOMPurify(dom.window);
-    
-    // Inicializamos mermaid
-    mermaid.initialize({ 
-      startOnLoad: false,
-      securityLevel: 'loose'
-    });
 
-    // Sanitize the mermaid code
-    const sanitizedCode = DOMPurify.sanitize(mermaidCode);
-    const { svg } = await mermaid.render('mermaid-diagram', sanitizedCode);
+    // Inicializar mermaid sin el uso de DOM (headless)
+    mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
+
+    // Renderizar el diagrama Mermaid a SVG
+    const { svg } = await mermaid.render('mermaid-diagram', mermaidCode);
 
     // Convertir el SVG a PNG usando sharp
     const pngBuffer = await sharp(Buffer.from(svg))
-      .png()
+      .png()  // Convertir a PNG
       .toBuffer();
 
     // Subir el PNG a Cloudinary
     const uploadResponse = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { folder: 'mermaid-diagrams', format: 'png' },
+        { folder: 'mermaid-diagrams', format: 'png' }, // Especificamos el formato como PNG
         (error, result) => {
           if (error) reject(error);
           else resolve(result);
         }
       );
 
-      uploadStream.end(pngBuffer);
+      uploadStream.end(pngBuffer);  // Subimos el buffer de la imagen PNG
     });
 
     // Devolver la URL generada de Cloudinary
