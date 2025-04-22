@@ -4,7 +4,6 @@ import fs from 'fs';
 import path from 'path';
 import { exec } from 'child_process';
 import util from 'util';
-import os from 'os';
 
 // Promisify exec for easier async/await usage
 const execPromise = util.promisify(exec);
@@ -35,10 +34,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Definir el archivo temporal para el diagrama generado
-    // En local, creamos un directorio temporal adecuado usando os.tmpdir()
-    const tempDir = os.tmpdir();
-    const outputPath = path.join(tempDir, 'mermaid-diagram.png');
+    // Asegurarse de usar el directorio correcto temporal para Vercel
+    const tempDir = '/tmp'; // Usar /tmp explícitamente en Vercel
+    const outputPath = path.join(tempDir, 'mermaid-diagram.svg');
     const tempFilePath = path.join(tempDir, 'mermaidCode.mmd');
 
     // Crear un archivo temporal con el código Mermaid para pasarlo a mermaid-cli
