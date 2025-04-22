@@ -1,6 +1,1 @@
-{
-    "buildCommand": "npm install && npm run build",
-    "installCommand": "dnf install -y $(cat chrome-dependencies.txt) && npm install",
-    "framework": "nextjs"
-  }
-  
+{ "rewrites": [{ "source": "/(.*)", "destination": "/" }] }
