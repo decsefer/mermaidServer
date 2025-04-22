@@ -39,7 +39,15 @@ export async function POST(request: Request) {
     global.window = dom.window as unknown as Window & typeof globalThis;
     global.document = dom.window.document;
     global.SVGElement = dom.window.SVGElement;
-    global.navigator = dom.window.navigator;
+    
+    // Create a custom navigator object instead of trying to set the global one
+    Object.defineProperty(global, 'navigator', {
+      value: {
+        userAgent: 'node.js',
+        language: 'en-US',
+      },
+      writable: true
+    });
     
     // Now import mermaid after the environment is set up
     const { default: mermaid } = await import('mermaid');
