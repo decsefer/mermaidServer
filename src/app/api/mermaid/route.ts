@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server';
-import puppeteer from 'puppeteer';  // Usa puppeteer-core
-import chromium from 'chrome-aws-lambda'; // Importa chrome-aws-lambda para Chromium en serverless
 import { v2 as cloudinary } from 'cloudinary';
+import fs from 'fs';
+import path from 'path';
+import { exec } from 'child_process';
+import util from 'util';
+import os from 'os';
+
+// Promisify exec for easier async/await usage
+const execPromise = util.promisify(exec);
 
 // Cloudinary configuration
 cloudinary.config({
@@ -29,48 +35,27 @@ export async function POST(request: Request) {
       );
     }
 
-    // Launch Puppeteer with chrome-aws-lambda's Chromium binary
-    const browser = await puppeteer.launch({
-      args: chromium.args,
-      executablePath: await chromium.executablePath,
-      headless: chromium.headless,
-    });
+    // Definir el archivo temporal para el diagrama generado
+    // En local, creamos un directorio temporal adecuado usando os.tmpdir()
+    const tempDir = os.tmpdir();
+    const outputPath = path.join(tempDir, 'mermaid-diagram.png');
+    const tempFilePath = path.join(tempDir, 'mermaidCode.mmd');
 
-    const page = await browser.newPage();
+    // Crear un archivo temporal con el código Mermaid para pasarlo a mermaid-cli
+    fs.writeFileSync(tempFilePath, mermaidCode);
 
-    // Load Mermaid content
-    await page.setContent(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-          <script>
-            mermaid.initialize({ startOnLoad: true });
-          </script>
-        </head>
-        <body>
-          <div class="mermaid">${mermaidCode}</div>
-        </body>
-      </html>
-    `);
-
-    // Wait for Mermaid to render
-    await page.waitForSelector('.mermaid svg');
-    const element = await page.$('.mermaid svg');
-    
-    if (!element) {
-      throw new Error('Failed to generate diagram');
+    // Ejecutar mermaid.cli para generar el SVG
+    try {
+      await execPromise(`mmdc -i ${tempFilePath} -o ${outputPath}`);
+    } catch (error) {
+      console.error("Error generating diagram:", error);
+      throw new Error("Error generating diagram");
     }
 
-    // Take screenshot
-    const buffer = await element.screenshot({
-      type: 'png',
-      omitBackground: true
-    });
+    // Leer el archivo generado
+    const buffer = fs.readFileSync(outputPath);
 
-    await browser.close();
-
-    // Upload to Cloudinary
+    // Subir el diagrama generado a Cloudinary
     const uploadResponse = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         { folder: 'mermaid-diagrams' },
@@ -83,6 +68,11 @@ export async function POST(request: Request) {
       uploadStream.end(buffer);
     });
 
+    // Eliminar los archivos temporales
+    fs.unlinkSync(tempFilePath);
+    fs.unlinkSync(outputPath);
+
+    // Devolver la URL generada de Cloudinary
     return NextResponse.json({
       success: true,
       url: (uploadResponse as { secure_url: string }).secure_url

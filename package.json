@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@mermaid-js/mermaid-cli": "^11.4.2",
     "chrome-aws-lambda": "^10.1.0",
     "cloudinary": "^2.6.0",
     "next": "15.3.1",
